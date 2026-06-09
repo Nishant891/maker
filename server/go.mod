@@ -1,3 +1,3 @@
-module maker/server
+module openve.tech/directory-watcher
 
-go 1.22
+go 1.26.3

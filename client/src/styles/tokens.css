@@ -1,0 +1,65 @@
+/* Design tokens — Linear-derived dark canvas system.
+   Single source for surface ladder, ink ladder, lavender accent, radii, type. */
+:root {
+  /* Canvas + surface ladder */
+  --canvas:            #010102;
+  --surface-1:         #0b0b0e;
+  --surface-2:         #131318;
+  --surface-3:         #1c1c22;
+  --surface-4:         #25252c;
+  --hairline:          #23252a;
+  --hairline-strong:   #2d2f35;
+  --hairline-tertiary: #1a1c20;
+
+  /* Ink ladder */
+  --ink:               #f7f8f8;
+  --ink-muted:         #d0d6e0;
+  --ink-subtle:        #8a8f98;
+  --ink-tertiary:      #62666d;
+
+  /* Single chromatic accent */
+  --primary:           #5e6ad2;
+  --primary-hover:     #828fff;
+  --primary-focus:     #5e69d1;
+  --on-primary:        #ffffff;
+
+  /* Semantic */
+  --success:           #27a644;
+  --danger:            #e5484d;
+  --overlay:           rgba(0, 0, 0, 0.66);
+
+  /* Radius */
+  --r-xs:   4px;
+  --r-sm:   6px;
+  --r-md:   8px;
+  --r-lg:   12px;
+  --r-xl:   16px;
+  --r-pill: 9999px;
+
+  /* Spacing */
+  --s-xxs: 4px;
+  --s-xs:  8px;
+  --s-sm:  12px;
+  --s-md:  16px;
+  --s-lg:  24px;
+  --s-xl:  32px;
+  --s-xxl: 48px;
+
+  /* Type stack */
+  --font-display: "SF Pro Display", -apple-system, "Inter", "Segoe UI", Roboto, sans-serif;
+  --font-text:    -apple-system, system-ui, "Inter", "Segoe UI", Roboto, sans-serif;
+  --font-mono:    ui-monospace, "SF Mono", "JetBrains Mono", "Geist Mono", Menlo, monospace;
+
+  /* Type tokens */
+  --t-display-lg-size: 40px; --t-display-lg-lh: 1.10; --t-display-lg-tracking: -1.0px;
+  --t-display-md-size: 28px; --t-display-md-lh: 1.20; --t-display-md-tracking: -0.6px;
+  --t-card-title-size: 18px; --t-card-title-lh: 1.30; --t-card-title-tracking: -0.4px;
+  --t-body-lg-size:    16px; --t-body-lg-lh: 1.50;    --t-body-lg-tracking: -0.05px;
+  --t-body-size:       14px; --t-body-lh: 1.50;       --t-body-tracking: 0;
+  --t-body-sm-size:    13px; --t-body-sm-lh: 1.50;    --t-body-sm-tracking: 0;
+  --t-caption-size:    12px; --t-caption-lh: 1.40;    --t-caption-tracking: 0;
+  --t-eyebrow-size:    11px; --t-eyebrow-lh: 1.30;    --t-eyebrow-tracking: 0.16em;
+  --t-button-size:     13px; --t-button-lh: 1.20;     --t-button-tracking: 0;
+
+  color-scheme: dark;
+}

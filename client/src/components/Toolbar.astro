@@ -1,0 +1,28 @@
+---
+// In-viewport editing toolbar. The Δ (delete) icon button is new; clicking
+// it calls __editor.deleteSelected on the iframe via toolbar.js. The B/I,
+// color picker, and align buttons are unchanged.
+---
+
+<div class="toolbar" id="toolbar">
+  <button class="btn btn-icon" data-cmd="bold"   title="Bold"><b>B</b></button>
+  <button class="btn btn-icon" data-cmd="italic" title="Italic"><i>I</i></button>
+  <span class="sep"></span>
+  <input type="color" id="colorPicker" value="#000000" title="Color" />
+  <span class="sep"></span>
+  <button class="btn btn-icon" data-cmd="left"   title="Align left">⟸</button>
+  <button class="btn btn-icon" data-cmd="center" title="Align center">≡</button>
+  <button class="btn btn-icon" data-cmd="right"  title="Align right">⟹</button>
+  <span class="sep"></span>
+  <button class="btn btn-icon" data-cmd="delete" title="Delete selected" aria-label="Delete">
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none"
+         stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2.5 4h11"></path>
+      <path d="M5 4V2.6c0-.33.27-.6.6-.6h4.8c.33 0 .6.27.6.6V4"></path>
+      <path d="M6.2 7v5"></path>
+      <path d="M9.8 7v5"></path>
+      <path d="M3.6 4l.78 8.92c.04.5.46.88.96.88h5.32c.5 0 .92-.38.96-.88L12.4 4"></path>
+    </svg>
+  </button>
+</div>

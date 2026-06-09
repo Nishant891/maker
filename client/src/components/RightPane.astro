@@ -1,0 +1,35 @@
+---
+import Toolbar from './Toolbar.astro';
+---
+
+<main class="pane-right">
+  <header class="canvas-header">
+    <div class="title" id="artifactTitle">
+      No artifact selected
+      <span class="dim" id="artifactDim"></span>
+    </div>
+
+    <Toolbar />
+
+    <div class="zoom">
+      <button class="btn btn-icon" id="zoomOut" title="Zoom out">−</button>
+      <span class="pct" id="zoomPct">—</span>
+      <button class="btn btn-icon" id="zoomReset" title="Fit">FIT</button>
+      <button class="btn btn-icon" id="zoomIn"  title="Zoom in">+</button>
+    </div>
+  </header>
+
+  <div class="viewport" id="viewport">
+    <div class="viewport-empty" id="viewportEmpty">Pick or generate an artifact</div>
+    <div class="stage-wrap">
+      <div class="stage" id="stage" style="display:none">
+        <iframe id="preview" title="artifact preview"></iframe>
+        <div class="stage-overlay" id="stageOverlay">
+          <div class="big-spinner"></div>
+          <div class="label" id="stageOverlayLabel">Writing</div>
+          <div class="file"  id="stageOverlayFile"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>

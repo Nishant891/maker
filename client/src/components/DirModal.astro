@@ -1,0 +1,35 @@
+---
+// Directory picker — opens on first run, and from the "Switch" button.
+// All interaction lives in scripts/dir-modal.js.
+---
+
+<div class="modal-backdrop" id="dirModal">
+  <div class="modal">
+    <div class="eyebrow">Working directory</div>
+    <h2>Pick a folder.</h2>
+    <p class="help">
+      opencode runs inside this folder and writes its HTML artifacts here.
+      Navigate into a folder to drill in, or create a new one. The maker code
+      folder is not allowed.
+    </p>
+
+    <div class="dir-path">
+      <button id="dirUp" class="btn btn-secondary" type="button" title="Go up">↑ Up</button>
+      <span id="dirPathText">~</span>
+    </div>
+
+    <div class="dir-list" id="dirList"></div>
+
+    <div class="dir-new">
+      <input type="text" id="dirNewName" placeholder="new-folder-name" spellcheck="false" />
+      <button id="dirCreate" class="btn btn-secondary" type="button">+ New folder</button>
+    </div>
+
+    <div id="dirError" class="dir-error"></div>
+
+    <div class="modal-actions">
+      <button id="dirCancel" class="btn btn-tertiary" type="button">Cancel</button>
+      <button id="dirSelect" class="btn btn-primary"  type="button">Use this directory</button>
+    </div>
+  </div>
+</div>

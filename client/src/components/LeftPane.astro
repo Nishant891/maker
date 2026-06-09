@@ -1,0 +1,63 @@
+---
+// Left sidebar: brand, canvas-path chip, tabs (Chat / Artifacts), plan
+// strip, chat messages, composer, and the artifacts list. Stateless markup
+// only — the JS modules under ../scripts wire it up.
+---
+
+<aside class="pane-left">
+  <header class="left-header">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <span class="wordmark">Maker</span>
+    </div>
+    <div class="canvas-meta">
+      <span class="name" id="canvasDir">no directory</span>
+      <button id="btnSwitchCanvas" class="btn btn-tertiary" type="button">Switch</button>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="chat" role="tab">Chat</button>
+    <button class="tab" data-tab="artifacts" role="tab">
+      Artifacts<span class="count" id="artifactCount"></span>
+    </button>
+  </nav>
+
+  <section class="tab-pane active" id="tab-chat" role="tabpanel">
+    <div class="plan-strip empty" id="planStrip">
+      <div class="plan-header">
+        <span>Plan</span>
+        <span class="progress" id="planProgress"></span>
+      </div>
+      <ol id="planList"></ol>
+    </div>
+
+    <div class="chat-messages" id="chatMessages">
+      <div class="chat-empty">
+        Describe an artifact to generate. Try “Make a 3-slide deck on Tesla”.
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="field">
+        <textarea
+          id="prompt"
+          placeholder="Make a 3-slide deck on Tesla…"
+          rows="3"
+        ></textarea>
+      </div>
+      <div class="actions">
+        <span class="hint"><kbd>↵</kbd> to send · <kbd>⇧</kbd>+<kbd>↵</kbd> newline</span>
+        <button id="btnSend" class="btn btn-primary" type="button">Send</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="tab-pane" id="tab-artifacts" role="tabpanel">
+    <div class="artifacts-list" id="artifactsList">
+      <div class="artifacts-empty">
+        No artifacts yet. They appear here as opencode writes them.
+      </div>
+    </div>
+  </section>
+</aside>
