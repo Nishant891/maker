@@ -1,32 +1,40 @@
-/* Design tokens — Linear-derived dark canvas system.
-   Single source for surface ladder, ink ladder, lavender accent, radii, type. */
+/* Design tokens — light canvas system.
+   Single source for surface ladder, ink ladder, indigo accent, radii, type. */
 :root {
   /* Canvas + surface ladder */
-  --canvas:            #010102;
-  --surface-1:         #0b0b0e;
-  --surface-2:         #131318;
-  --surface-3:         #1c1c22;
-  --surface-4:         #25252c;
-  --hairline:          #23252a;
-  --hairline-strong:   #2d2f35;
-  --hairline-tertiary: #1a1c20;
+  --canvas:            #f6f7f9;
+  --surface-1:         #ffffff;
+  --surface-2:         #f2f3f5;
+  --surface-3:         #e8eaed;
+  --surface-4:         #d8dbe0;
+  --hairline:          #e6e8ec;
+  --hairline-strong:   #d4d8de;
+  --hairline-tertiary: #eef0f3;
 
   /* Ink ladder */
-  --ink:               #f7f8f8;
-  --ink-muted:         #d0d6e0;
-  --ink-subtle:        #8a8f98;
-  --ink-tertiary:      #62666d;
+  --ink:               #0c0d10;
+  --ink-muted:         #3d4148;
+  --ink-subtle:        #6a6f78;
+  --ink-tertiary:      #9aa0a8;
 
   /* Single chromatic accent */
   --primary:           #5e6ad2;
-  --primary-hover:     #828fff;
-  --primary-focus:     #5e69d1;
+  --primary-hover:     #4f5bc4;
+  --primary-focus:     #4651b8;
+  --primary-tint:      rgba(94, 105, 210, 0.10);
   --on-primary:        #ffffff;
 
   /* Semantic */
-  --success:           #27a644;
-  --danger:            #e5484d;
-  --overlay:           rgba(0, 0, 0, 0.66);
+  --success:           #1f8f3b;
+  --danger:            #d62a30;
+  --danger-tint:       rgba(214, 42, 48, 0.10);
+  --overlay:           rgba(15, 17, 21, 0.45);
+
+  /* Elevations */
+  --shadow-1: 0 1px 2px rgba(15, 17, 21, 0.05);
+  --shadow-2: 0 4px 14px rgba(15, 17, 21, 0.08);
+  --shadow-3: 0 10px 30px rgba(15, 17, 21, 0.10);
+  --shadow-4: 0 18px 50px rgba(15, 17, 21, 0.14);
 
   /* Radius */
   --r-xs:   4px;
@@ -61,5 +69,7 @@
   --t-eyebrow-size:    11px; --t-eyebrow-lh: 1.30;    --t-eyebrow-tracking: 0.16em;
   --t-button-size:     13px; --t-button-lh: 1.20;     --t-button-tracking: 0;
 
-  color-scheme: dark;
+  color-scheme: light;
 }
+
+html { background: var(--canvas); }

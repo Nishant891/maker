@@ -1,28 +1,77 @@
 ---
-// In-viewport editing toolbar. The Δ (delete) icon button is new; clicking
-// it calls __editor.deleteSelected on the iframe via toolbar.js. The B/I,
-// color picker, and align buttons are unchanged.
+// Floating insert dock — sits at the bottom-center of the viewport. Each
+// button asks the editor (running inside the iframe) to insert a fresh
+// element at the artifact's visual center and select it. All per-element
+// formatting (B/I/U/S/colour/etc.) lives in the selection toolbar that the
+// editor renders next to the selected element.
 ---
 
-<div class="toolbar" id="toolbar">
-  <button class="btn btn-icon" data-cmd="bold"   title="Bold"><b>B</b></button>
-  <button class="btn btn-icon" data-cmd="italic" title="Italic"><i>I</i></button>
-  <span class="sep"></span>
-  <input type="color" id="colorPicker" value="#000000" title="Color" />
-  <span class="sep"></span>
-  <button class="btn btn-icon" data-cmd="left"   title="Align left">⟸</button>
-  <button class="btn btn-icon" data-cmd="center" title="Align center">≡</button>
-  <button class="btn btn-icon" data-cmd="right"  title="Align right">⟹</button>
-  <span class="sep"></span>
-  <button class="btn btn-icon" data-cmd="delete" title="Delete selected" aria-label="Delete">
-    <svg viewBox="0 0 16 16" width="14" height="14" fill="none"
-         stroke="currentColor" stroke-width="1.6"
-         stroke-linecap="round" stroke-linejoin="round">
-      <path d="M2.5 4h11"></path>
-      <path d="M5 4V2.6c0-.33.27-.6.6-.6h4.8c.33 0 .6.27.6.6V4"></path>
-      <path d="M6.2 7v5"></path>
-      <path d="M9.8 7v5"></path>
-      <path d="M3.6 4l.78 8.92c.04.5.46.88.96.88h5.32c.5 0 .92-.38.96-.88L12.4 4"></path>
+<div class="insert-dock" id="insertDock" role="toolbar" aria-label="Insert">
+  <button class="ins-btn" data-insert="text" data-label="Text" aria-label="Insert text">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 5h12"></path>
+      <path d="M10 5v11"></path>
+      <path d="M7.5 16h5"></path>
+    </svg>
+  </button>
+  <button class="ins-btn" data-insert="heading" data-label="Heading" aria-label="Insert heading">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M5 4v12"></path>
+      <path d="M15 4v12"></path>
+      <path d="M5 10h10"></path>
+    </svg>
+  </button>
+  <span class="ins-sep"></span>
+  <button class="ins-btn" data-insert="image" data-label="Image" aria-label="Insert image">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="4" width="14" height="12" rx="2"></rect>
+      <circle cx="8" cy="9" r="1.4"></circle>
+      <path d="M3.6 14.5l4-4 3 3 2-2 3.4 3"></path>
+    </svg>
+  </button>
+  <button class="ins-btn" data-insert="video" data-label="Video" aria-label="Insert video">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2.5" y="5" width="11" height="10" rx="2"></rect>
+      <path d="M13.5 9l4-2v6l-4-2z" fill="currentColor"></path>
+    </svg>
+  </button>
+  <button class="ins-btn" data-insert="chart" data-label="Chart" aria-label="Insert chart">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 16h14"></path>
+      <rect x="4.5"  y="10" width="2.4" height="5"  rx="0.6" fill="currentColor" stroke="none"></rect>
+      <rect x="8.8"  y="6"  width="2.4" height="9"  rx="0.6" fill="currentColor" stroke="none"></rect>
+      <rect x="13.1" y="8"  width="2.4" height="7"  rx="0.6" fill="currentColor" stroke="none"></rect>
+    </svg>
+  </button>
+  <button class="ins-btn" data-insert="line-chart" data-label="Line chart" aria-label="Insert line chart">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 16h14"></path>
+      <path d="M4 13l3.5-4 3 2.5 4.5-6"></path>
+      <circle cx="4" cy="13" r="1.1" fill="currentColor" stroke="none"></circle>
+      <circle cx="7.5" cy="9" r="1.1" fill="currentColor" stroke="none"></circle>
+      <circle cx="10.5" cy="11.5" r="1.1" fill="currentColor" stroke="none"></circle>
+      <circle cx="15" cy="5.5" r="1.1" fill="currentColor" stroke="none"></circle>
+    </svg>
+  </button>
+  <span class="ins-sep"></span>
+  <button class="ins-btn" data-insert="rect" data-label="Rectangle" aria-label="Insert rectangle">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+      <rect x="3.5" y="5" width="13" height="10" rx="1.8"></rect>
+    </svg>
+  </button>
+  <button class="ins-btn" data-insert="circle" data-label="Circle" aria-label="Insert circle">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+      <circle cx="10" cy="10" r="6"></circle>
+    </svg>
+  </button>
+  <button class="ins-btn" data-insert="divider" data-label="Divider" aria-label="Insert divider">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+      <path d="M3 10h14"></path>
+    </svg>
+  </button>
+  <button class="ins-btn" data-insert="button" data-label="Button" aria-label="Insert button">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+      <rect x="3" y="7" width="14" height="6" rx="3"></rect>
     </svg>
   </button>
 </div>

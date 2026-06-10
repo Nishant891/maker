@@ -1,57 +1,24 @@
-// Toolbar over the iframe: bold / italic / color / align. Wired to the
-// __editor handle the injected EDITOR_JS publishes on the iframe's window.
+// Bottom-floating insert dock. Each button calls __editor.insertElement(kind)
+// inside the iframe; the editor places the new node at the artifact's visual
+// center, gives it a fresh z-index, and selects it so the in-iframe
+// selection toolbar (B / I / U / S / colour / align / border / rounded / shadow
+// / A± / delete) appears automatically.
 
 export function initToolbar() {
-  const $toolbar = document.getElementById('toolbar');
-  const $color   = document.getElementById('colorPicker');
-  const $iframe  = document.getElementById('preview');
+  const $dock   = document.getElementById('insertDock');
+  const $iframe = document.getElementById('preview');
+  if (!$dock || !$iframe) return;
 
-  $toolbar.addEventListener('click', (e) => {
-    const btn = e.target.closest('button');
+  $dock.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-insert]');
     if (!btn) return;
-    const cmd = btn.dataset.cmd;
+    const kind = btn.dataset.insert;
     const ed = $iframe.contentWindow && $iframe.contentWindow.__editor;
     if (!ed) return;
-    if (cmd === 'bold')   ed.toggleClass('e-bold');
-    if (cmd === 'italic') ed.toggleClass('e-italic');
-    if (cmd === 'delete') ed.deleteSelected();
-    if (cmd === 'left' || cmd === 'center' || cmd === 'right') ed.setAlign(cmd);
-    refreshToolbar();
-  });
-  $color.addEventListener('input', () => {
-    const ed = $iframe.contentWindow && $iframe.contentWindow.__editor;
-    if (ed) ed.setColor($color.value);
+    ed.insertElement(kind);
   });
 
-  window.__editorOnSelectionChange = refreshToolbar;
-}
-
-function refreshToolbar() {
-  const $toolbar = document.getElementById('toolbar');
-  const $color   = document.getElementById('colorPicker');
-  const $iframe  = document.getElementById('preview');
-  const ed  = $iframe.contentWindow && $iframe.contentWindow.__editor;
-  const sel = ed && ed.getSelected();
-  $toolbar.querySelectorAll('button[data-cmd]').forEach(b => b.classList.remove('active'));
-  if (!sel) return;
-  if (sel.classList.contains('e-bold'))   markActive($toolbar, 'bold');
-  if (sel.classList.contains('e-italic')) markActive($toolbar, 'italic');
-  const align = sel.style.textAlign;
-  if (align === 'left')   markActive($toolbar, 'left');
-  if (align === 'center') markActive($toolbar, 'center');
-  if (align === 'right')  markActive($toolbar, 'right');
-  if (sel.style.color) {
-    const hex = rgbToHex(sel.style.color);
-    if (hex) $color.value = hex;
-  }
-}
-function markActive(toolbar, cmd) {
-  const btn = toolbar.querySelector('[data-cmd="' + cmd + '"]');
-  if (btn) btn.classList.add('active');
-}
-function rgbToHex(s) {
-  const m = /rgb\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\)/.exec(s);
-  if (!m) return null;
-  const toHex = n => Number(n).toString(16).padStart(2, '0');
-  return '#' + toHex(m[1]) + toHex(m[2]) + toHex(m[3]);
+  // No-op kept around for parity with the editor's selection-change callback.
+  // The selection-state UI lives inside the iframe now.
+  window.__editorOnSelectionChange = () => {};
 }

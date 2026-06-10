@@ -226,6 +226,7 @@ export function setViewport(name, content, width, height) {
   dom.stage.style.display = 'block';
   dom.stage.style.width  = w + 'px';
   dom.stage.style.height = h + 'px';
+  if (dom.paneRight) dom.paneRight.classList.add('has-artifact');
   if (content) {
     dom.preview.srcdoc = buildSrcdoc(content);
   } else {
