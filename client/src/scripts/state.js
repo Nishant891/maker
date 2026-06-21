@@ -13,8 +13,15 @@ export const state = {
   browseReason: '',
 
   // Live artifact list (one entry per file event)
-  artifacts: [],              // [{ name, content, width, height }]
+  artifacts: [],              // [{ name, content, width, height }] (height<=0 = auto)
   activeName: null,           // which artifact is shown in the viewport
+  activeAutoHeight: false,    // current viewport artifact uses h=auto
+
+  // Edit dirty bookkeeping for the debounced disk save.
+  dirtyFile: null,            // name of the artifact with unsaved edits
+  saveTimer: 0,
+  saveInFlight: false,
+  pendingSave: false,
 
   todos: [],                  // [{ text, status: 'pending'|'active'|'done' }]
   userMsgs: [],               // mixed timeline of msg + tool entries

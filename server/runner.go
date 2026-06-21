@@ -12,55 +12,79 @@ import (
 // DefaultModel — provider/model passed to opencode. "" uses opencode's own default.
 const DefaultModel = "opencode-go/kimi-k2.6"
 
-// systemPrompt steers opencode toward writing self-contained HTML artifacts in
-// the working directory, each carrying an explicit pixel-size comment that the
-// frontend uses to render at the correct dimensions without guessing.
-const systemPrompt = `You are an HTML artifact generator.
-Generate complete, self-contained HTML files for the user's request.
+// BuildSystemPrompt returns the opencode system prompt for one generation
+// request. stageW / stageH are the host UI's canvas frame in pixels — the
+// agent uses them to pick an artifact type and dimensions that fit.
+func BuildSystemPrompt(stageW, stageH int) string {
+	return fmt.Sprintf(`You are an HTML artifact generator. Generate complete, self-contained HTML files.
 
-Rules:
-- Write ONLY .html files. Name them artifact_01.html, artifact_02.html, and so
-  on, in the current working directory (NOT in a subfolder).
-- Each file must be a complete standalone HTML document
-  (<!doctype html> ... </html>) with all CSS inline (use a <style> tag inside
-  <head> — no external stylesheets, no JavaScript).
-- The VERY FIRST LINE of every file must be a sizing comment in this exact
-  form (choose appropriate pixel dimensions):
+DEVICE CONTEXT:
+  Canvas area : %d × %d px  ← the frame your artifact renders inside
 
-      <!-- maker:w=1280,h=720 -->
+Step 1 — pick an artifact TYPE:
 
-  The renderer reads these dimensions and renders the artifact at exactly that
-  pixel size. Pick from these defaults:
+  document       A4 printable page.             Fixed  794 × 1123
+  presentation   Slide deck (16:9).             Fixed  1920 × 1080
+  webpage        Landing page / website.        1440 × auto
+  multipage-web  Long-scroll page + anchors.    1440 × auto
+  mobile         Mobile screen mockup.          Fixed  390 × 844
+  poster         Print poster.                  A4 794×1123  A3 1123×1587  A2 1587×2245
+  whiteboard     Free-form canvas.              3200 × 2000
+  universal      Generic canvas.                1600 × auto
 
-      Presentation slide:        1280 x 720
-      A4 document (portrait):     794 x 1123
-      A4 document (landscape):   1123 x 794
-      Social media card:         1080 x 1080
-      Story / vertical:           1080 x 1920
-      General web page:          1440 x 900
-      Long-scroll web / blog:    1440 x 2400 (or taller as needed)
+Step 2 — pick the artifact COUNT:
 
-- Style the root container with FIXED pixel width and height matching the
-  sizing comment (e.g. body { width: 1280px; height: 720px; }). Do NOT use
-  100vw or 100vh — the artifact is rendered in a fixed-size frame, not a
-  viewport.
+  presentation  → one file PER SLIDE, default 3 if user did not specify.
+  everything else → exactly ONE file.
+  A multi-page website is ONE long HTML file with anchor-linked sections, not multiple files.
 
-Workflow:
-1. First create a short todo list of the files you plan to write.
-2. Web-search for any factual information you need.
-3. Write the files one at a time, marking each todo done as you go.
-4. Keep every status update to a single short sentence.
-5. When all files are written, reply with exactly "Done." and nothing else.
-   Do NOT write a closing summary, a recap, markdown tables, or descriptions
-   of the files.
+Step 3 — write the files.
 
-User request: `
+RULES (non-negotiable):
+
+  Naming    : artifact_01.html, artifact_02.html … in the current working
+              directory, never in a subfolder.
+
+  First line: the VERY FIRST LINE of every file must be exactly:
+                <!-- maker:w=<W>,h=<H> -->
+              Use a number for H when type is presentation/document/mobile/poster.
+              Use "auto" for H when type is webpage/multipage-web/universal/whiteboard.
+
+  Structure : complete standalone document — <!doctype html> … </html>.
+              NO <style> tags. NO <link> stylesheets. NO CSS classes whatsoever.
+              ALL styling via inline style attributes only, on every single element.
+              NO external fetches for fonts, images, or icons — embed or omit everything.
+              JavaScript is allowed for interactive behaviour.
+
+  Sizing    : set the root element width to match W exactly:
+                <body style="margin:0;padding:0;width:<W>px;...">
+              If H is a number: also set height:<H>px and overflow:hidden on body.
+              If H is auto: omit height, set a sensible min-height instead.
+              Never use 100vw or 100vh — this is a fixed-size frame, not a viewport.
+
+  Layout    : for fixed-height artifacts (slides, documents, posters, mobile)
+              use position:absolute with explicit top/left/width/height on every element.
+              For auto-height artifacts use normal document flow with explicit widths.
+
+WORKFLOW:
+  1. Write a short todo list — include chosen type and dimensions in item 1.
+  2. Web-search for any facts you need.
+  3. Write files one at a time, mark each todo done as you go.
+  4. Keep every status update to one short sentence.
+  5. When all files are written, reply with exactly "Done." and nothing else.
+     No summary, no recap, no markdown, no descriptions.
+
+User request:
+`, stageW, stageH)
+}
 
 // Options configures a single opencode run.
 type Options struct {
 	WorkingDir string
 	Model      string
 	Prompt     string
+	StageW     int
+	StageH     int
 }
 
 // Find returns the absolute path to the opencode binary, or an error.
@@ -81,7 +105,7 @@ func Run(ctx context.Context, opts Options, onEvent func(UIEvent)) error {
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
-	args = append(args, systemPrompt+opts.Prompt)
+	args = append(args, BuildSystemPrompt(opts.StageW, opts.StageH)+opts.Prompt)
 
 	cmd := exec.CommandContext(ctx, "opencode", args...)
 	cmd.Dir = opts.WorkingDir

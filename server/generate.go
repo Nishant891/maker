@@ -16,6 +16,8 @@ import (
 type genReq struct {
 	Dir    string `json:"dir"`
 	Prompt string `json:"prompt"`
+	StageW int    `json:"stageW"`
+	StageH int    `json:"stageH"`
 }
 
 // handleGenerate spawns `opencode run` inside req.Dir and streams every
@@ -88,6 +90,8 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 		WorkingDir: dir,
 		Model:      appModel,
 		Prompt:     req.Prompt,
+		StageW:     req.StageW,
+		StageH:     req.StageH,
 	}, send); err != nil {
 		log.Printf("[generate] run error: %v", err)
 		send(UIEvent{Type: "error", Message: err.Error()})

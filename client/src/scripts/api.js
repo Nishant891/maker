@@ -25,14 +25,31 @@ export function fileURL(dir, file) {
                   '&file=' + encodeURIComponent(file);
 }
 
+// saveArtifact writes the live (edited) HTML for `file` back to disk inside
+// `dir`. The server scopes `file` to `dir` so this cannot escape the canvas.
+export async function saveArtifact(dir, file, content) {
+  const res = await fetch(SERVER + '/api/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dir, file, content }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.error) {
+    throw new Error(data.error || ('HTTP ' + res.status));
+  }
+  return data;
+}
+
 // streamGenerate POSTs to /api/generate and parses the SSE stream into
 // UIEvent objects, calling onEvent for each one. Resolves when the stream
 // ends. Throws if the HTTP call itself fails.
 export async function streamGenerate(body, onEvent) {
+  const stageW = Math.floor(window.innerWidth - 380);
+  const stageH = Math.floor(window.innerHeight);
   const res = await fetch(SERVER + '/api/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, stageW, stageH }),
   });
   if (!res.ok) {
     const t = await res.text().catch(() => '');

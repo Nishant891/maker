@@ -130,17 +130,33 @@ function statusEl(label) {
 }
 
 // ─── Artifacts list ──────────────────────────────────────────────────
+// Width-only kinds catch any "auto height" artifact, including webpages,
+// long-scroll multi-page sites, and the universal canvas.
 const KIND_NAMES = {
-  '1280x720':  'Slide',
-  '794x1123':  'A4',
-  '1123x794':  'A4 ‧ L',
-  '1080x1080': 'Card',
-  '1080x1920': 'Story',
-  '1440x900':  'Web',
-  '1440x2400': 'Long',
+  '1280x720':   'Slide',
+  '1920x1080':  'Slide',
+  '794x1123':   'A4',
+  '1123x794':   'A4 ‧ L',
+  '1080x1080':  'Card',
+  '1080x1920':  'Story',
+  '390x844':    'Mobile',
+  '1440x900':   'Web',
+  '1440x2400':  'Long',
+  '1587x2245':  'A3',
+  '2245x3175':  'A2',
+  '3200x2000':  'Board',
+};
+const KIND_WIDTH_AUTO = {
+  '1440': 'Web',
+  '1600': 'Canvas',
+  '3200': 'Board',
 };
 function kindFromDims(w, h) {
+  if (h <= 0) return KIND_WIDTH_AUTO[String(w)] || 'Auto';
   return KIND_NAMES[w + 'x' + h] || 'Custom';
+}
+function fmtDim(w, h) {
+  return w + ' × ' + (h > 0 ? h : 'auto');
 }
 function prettyName(name) {
   if (!name) return 'Untitled';
@@ -166,7 +182,7 @@ export function renderArtifacts() {
       classes: (a.name === state.activeName ? ' active' : ''),
       num: String(i + 1).padStart(2, '0'),
       title: prettyName(a.name),
-      sub: a.width + ' × ' + a.height,
+      sub: fmtDim(a.width, a.height),
       badge: kindFromDims(a.width, a.height),
       onClick: () => selectArtifact(a.name),
     }));
@@ -216,12 +232,17 @@ function artifactCard(opts) {
 }
 
 // ─── Viewport / iframe / overlay ─────────────────────────────────────
+// height <= 0 (sentinel) means "auto" — the stage starts at a tall default,
+// and the editor inside the iframe calls __editorReportHeight(px) once the
+// body settles, after which we shrink/grow the stage to fit.
 export function setViewport(name, content, width, height) {
   state.activeName = name;
-  const w = width  || 1280;
-  const h = height || 720;
+  const w = width  || 1920;
+  const autoH = !(height > 0);
+  const h = autoH ? 1080 : height;
+  state.activeAutoHeight = autoH;
   dom.artifactTitle.firstChild.textContent = prettyName(name) + ' ';
-  dom.artifactDim.textContent = w + ' × ' + h;
+  dom.artifactDim.textContent = fmtDim(w, autoH ? -1 : h);
   dom.viewportEmpty.style.display = 'none';
   dom.stage.style.display = 'block';
   dom.stage.style.width  = w + 'px';
@@ -234,6 +255,19 @@ export function setViewport(name, content, width, height) {
       '<!doctype html><html><body style="margin:0;background:#fff"></body></html>';
   }
   applyZoom();
+}
+
+// Called by the in-iframe editor (window.__editorReportHeight) when the body
+// has settled. Only honoured for artifacts whose maker comment was h=auto.
+export function reportIframeHeight(px) {
+  if (!state.activeAutoHeight) return;
+  const w = parseFloat(dom.stage.style.width) || 1920;
+  const next = Math.max(200, Math.round(px));
+  if (parseFloat(dom.stage.style.height) === next) return;
+  dom.stage.style.height = next + 'px';
+  applyZoom();
+  // Keep the dim readout in sync with the chosen artifact's record.
+  dom.artifactDim.textContent = fmtDim(w, -1);
 }
 export function selectArtifact(name) {
   const a = state.artifacts.find(x => x.name === name);

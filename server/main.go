@@ -5,6 +5,7 @@
 //   POST /api/select              {path}        validate + mkdir -p the working dir
 //   POST /api/generate            {dir,prompt}  SSE stream of UIEvents from opencode
 //   GET  /api/file?dir=&file=     serve a generated artifact from inside dir
+//   POST /api/save                {dir,file,content}  persist iframe edits to disk
 package main
 
 import (
@@ -52,6 +53,7 @@ func main() {
 	mux.HandleFunc("/api/select", withCORS(handleSelect))
 	mux.HandleFunc("/api/generate", withCORS(handleGenerate))
 	mux.HandleFunc("/api/file", withCORS(handleFile))
+	mux.HandleFunc("/api/save", withCORS(handleSave))
 
 	addr := ":" + *port
 	log.Printf("[server] listening on http://localhost%s", addr)

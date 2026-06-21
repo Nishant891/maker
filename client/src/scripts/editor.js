@@ -14,6 +14,17 @@
 //       at the artifact's visual center, gives it a high z-index, and selects
 //       it so the handles + selection toolbar appear immediately.
 //   4.  __editor.setBgColor + __editor.nudgeFont for the toolbar.
+//   5.  resolveTarget() — selection / drag / dblclick always operate on the
+//       component root (inserted wrapper, table, svg root, media element),
+//       never on internals. SVG internals and table cells are not CSS boxes
+//       you can absolutize, so they must never become drag targets.
+//   6.  z-index lifecycle — the counter is seeded from the document's max
+//       z-index (AI HTML often ships inline z-index: 100/9999), the selection
+//       bump is temporary and restored on deselect, and a real drag commits
+//       the new z so "dropped on top" sticks.
+//   7.  Handle/toolbar updates during drag/resize are rAF'd position
+//       mutations instead of full DOM rebuilds; the toolbar hides while
+//       dragging and comes back on drop.
 
 export const EDITOR_CSS = `
   html, body {
@@ -147,10 +158,25 @@ export const EDITOR_CSS = `
   body * { cursor: default; }
   .editor-toolbar, .editor-toolbar * { cursor: pointer; }
   .resize-handle { cursor: inherit; }
+  [contenteditable="true"], [contenteditable="true"] * { cursor: text !important; }
 
-  [data-editor-inserted] img,
-  [data-editor-inserted] video,
-  [data-editor-inserted] iframe { pointer-events: none; }
+  /* All clicks on inserted components must land on the wrapper itself —
+     never on svg internals, table cells, media, etc. While the wrapper is
+     being text-edited, children become interactive again so the caret can
+     be placed. */
+  [data-editor-inserted]:not([contenteditable="true"]) * { pointer-events: none; }
+
+  /* Alignment guides drawn while dragging an element. The .v variant is a
+     vertical hairline spanning the artifact height; .h is horizontal. */
+  .editor-guide {
+    position: absolute;
+    background: #ff3b6b;
+    pointer-events: none;
+    z-index: 2147483645;
+    opacity: 0.95;
+  }
+  .editor-guide.v { width: 1px; }
+  .editor-guide.h { height: 1px; }
 `;
 
 const TRASH_SVG = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11"/><path d="M5 4V2.6c0-.33.27-.6.6-.6h4.8c.33 0 .6.27.6.6V4"/><path d="M6.2 7v5"/><path d="M9.8 7v5"/><path d="M3.6 4l.78 8.92c.04.5.46.88.96.88h5.32c.5 0 .92-.38.96-.88L12.4 4"/></svg>`;
@@ -171,13 +197,26 @@ export const EDITOR_JS = `
     let zCounter = 1;
     const handles = [];
     let toolbar = null;
+    let chromeHidden = false;   // toolbar hidden during drag / resize
+    let raf = 0;                // pending rAF id for handle updates
     const HANDLE_DIRS = ['nw','n','ne','e','se','s','sw','w'];
+
+    // Components whose internals must never be selected or dragged. Clicks
+    // inside any of these climb to the component root (and further to the
+    // inserted wrapper if there is one).
+    const ATOMIC_SELECTOR = '[data-editor-inserted], table, svg, video, iframe, img';
 
     function exitEditing() {
       if (!editing) return;
-      editing.setAttribute('contenteditable', 'false');
-      try { editing.blur(); } catch (_) {}
+      const wasEditing = editing;
+      const start = wasEditing.__editStart;
+      wasEditing.setAttribute('contenteditable', 'false');
+      try { wasEditing.blur(); } catch (_) {}
       editing = null;
+      if (start !== undefined) {
+        if (wasEditing.innerHTML !== start) notifyParentChange();
+        delete wasEditing.__editStart;
+      }
     }
 
     function isEditorChrome(el) {
@@ -187,13 +226,45 @@ export const EDITOR_JS = `
       return !!(el.closest && el.closest('.editor-toolbar'));
     }
 
+    // Seed the z counter above anything the AI generated — artifacts often
+    // ship inline z-index: 100 / 9999 on hero sections, and inserted elements
+    // must start above all of it.
+    function seedZ() {
+      let max = 0;
+      doc.querySelectorAll('body *').forEach(function (n) {
+        const z = parseInt(n.style.zIndex || getComputedStyle(n).zIndex, 10);
+        if (!isNaN(z) && z < 2147480000) max = Math.max(max, z);
+      });
+      zCounter = max + 1;
+    }
+    seedZ();
+
+    // Map a raw event target to the element the editor should operate on.
+    // Returns null for body / html (caller deselects or ignores).
+    function resolveTarget(node) {
+      if (node instanceof SVGElement) {
+        // Inner SVG nodes are not CSS boxes (no offsetLeft, no left/top
+        // positioning) — climb to the outermost <svg> root.
+        while (node.ownerSVGElement) node = node.ownerSVGElement;
+      }
+      if (!node || node === doc.body || node === doc.documentElement) return null;
+      if (!node.closest) return null;
+      const atomic = node.closest(ATOMIC_SELECTOR);
+      if (atomic) return atomic.closest('[data-editor-inserted]') || atomic;
+      return node;
+    }
+
     function ensureAbsolute(el) {
       const cs = getComputedStyle(el);
       if (cs.position === 'static' || !el.style.left || !el.style.top) {
-        const oLeft   = el.offsetLeft;
-        const oTop    = el.offsetTop;
-        const oWidth  = el.offsetWidth;
-        const oHeight = el.offsetHeight;
+        // SVG roots are CSS boxes but expose no offsetLeft/offsetTop
+        // (HTMLElement API only) — fall back to rect-based measurement.
+        const isHtml     = typeof el.offsetLeft === 'number';
+        const beforeRect = el.getBoundingClientRect();
+        const oLeft   = isHtml ? el.offsetLeft   : 0;
+        const oTop    = isHtml ? el.offsetTop    : 0;
+        const oWidth  = isHtml ? el.offsetWidth  : beforeRect.width;
+        const oHeight = isHtml ? el.offsetHeight : beforeRect.height;
 
         const absDescendants = [];
         el.querySelectorAll('*').forEach(d => {
@@ -205,7 +276,9 @@ export const EDITOR_JS = `
         if (el.parentNode && !el.__ghost) {
           const ghost = doc.createElement('div');
           ghost.className = 'edit-ghost';
-          ghost.style.display       = cs.display;
+          // display:inline ignores width/height — the ghost would hold no
+          // space for inline elements (spans, svg roots), so promote it.
+          ghost.style.display       = (cs.display === 'inline') ? 'inline-block' : cs.display;
           ghost.style.margin        = cs.margin;
           ghost.style.flex          = cs.flex;
           ghost.style.verticalAlign = cs.verticalAlign;
@@ -218,8 +291,19 @@ export const EDITOR_JS = `
 
         el.style.position = 'absolute';
         el.style.margin   = '0';
-        el.style.left   = oLeft   + 'px';
-        el.style.top    = oTop    + 'px';
+        if (isHtml) {
+          el.style.left = oLeft + 'px';
+          el.style.top  = oTop  + 'px';
+        } else {
+          // Solve for left/top by probing where (0,0) lands inside the
+          // element's containing block, then offsetting back to where the
+          // element was visually before the lift.
+          el.style.left = '0px';
+          el.style.top  = '0px';
+          const probe = el.getBoundingClientRect();
+          el.style.left = (beforeRect.left - probe.left) + 'px';
+          el.style.top  = (beforeRect.top  - probe.top)  + 'px';
+        }
         el.style.width  = oWidth  + 'px';
         el.style.height = oHeight + 'px';
 
@@ -240,20 +324,113 @@ export const EDITOR_JS = `
       try { parent.__editorOnSelectionChange && parent.__editorOnSelectionChange(); } catch (e) {}
     }
 
+    // Any DOM mutation that should be persisted to disk OR live in the undo
+    // history funnels through here. The host page wires __editorOnChange to
+    // a debounced save.
+    function notifyParentChange() {
+      try { parent.__editorOnChange && parent.__editorOnChange(); } catch (e) {}
+      scheduleHeightReport();
+    }
+
+    // ── Undo / redo history ──────────────────────────────────────────
+    // We snapshot doc.body.innerHTML AFTER stripping selection chrome so
+    // restoring a state can never resurrect stale handles or toolbars.
+    // pushUndo() is called BEFORE every atomic op so the captured state is
+    // the one to return to on Cmd+Z.
+    const UNDO_MAX = 100;
+    const undoStack = [];
+    const redoStack = [];
+
+    function snapshotBody() {
+      const wasSelected = selected;
+      if (wasSelected) wasSelected.classList.remove('selected');
+      clearHandles();
+      const html = doc.body.innerHTML;
+      if (wasSelected) {
+        wasSelected.classList.add('selected');
+        // Re-show handles for the still-selected element after snapshot.
+        placeHandles();
+      }
+      return html;
+    }
+    function pushUndo() {
+      undoStack.push(snapshotBody());
+      if (undoStack.length > UNDO_MAX) undoStack.shift();
+      redoStack.length = 0;
+    }
+    function applySnapshot(html) {
+      // Drop selection / chrome before swapping innerHTML so dangling
+      // references don't linger across the restore.
+      if (selected) selected.classList.remove('selected');
+      selected = null;
+      editing = null;
+      clearHandles();
+      doc.body.innerHTML = html;
+      notifyParentSelection();
+    }
+    function undo() {
+      if (!undoStack.length) return;
+      const cur = snapshotBody();
+      const prev = undoStack.pop();
+      redoStack.push(cur);
+      applySnapshot(prev);
+      try { parent.__editorOnChange && parent.__editorOnChange(); } catch (e) {}
+      scheduleHeightReport();
+    }
+    function redo() {
+      if (!redoStack.length) return;
+      const cur = snapshotBody();
+      const next = redoStack.pop();
+      undoStack.push(cur);
+      applySnapshot(next);
+      try { parent.__editorOnChange && parent.__editorOnChange(); } catch (e) {}
+      scheduleHeightReport();
+    }
+
+    // ── Height reporting (auto-height artifacts) ─────────────────────
+    // The parent page calls setViewport with a sentinel height for "auto"
+    // artifacts and listens on __editorReportHeight to size the stage to
+    // the actual body content. Debounce so a burst of edits collapses to
+    // one report.
+    let heightReportTimer = 0;
+    function scheduleHeightReport() {
+      if (heightReportTimer) return;
+      heightReportTimer = setTimeout(function () {
+        heightReportTimer = 0;
+        reportHeight();
+      }, 80);
+    }
+    function reportHeight() {
+      try {
+        // Measure with chrome hidden so handles/toolbar can't inflate the
+        // scrollHeight just because they're positioned past the content.
+        const tbDisp = toolbar ? toolbar.style.display : null;
+        if (toolbar) toolbar.style.display = 'none';
+        handles.forEach(function (h) { h.style.display = 'none'; });
+        const px = Math.max(
+          doc.body.scrollHeight,
+          doc.documentElement.scrollHeight
+        );
+        if (toolbar && tbDisp !== null) toolbar.style.display = tbDisp;
+        handles.forEach(function (h) { h.style.display = ''; });
+        if (parent && parent.__editorReportHeight) {
+          parent.__editorReportHeight(px);
+        }
+      } catch (e) {}
+    }
+
     function clearHandles() {
       handles.forEach(h => h.remove());
       handles.length = 0;
       if (toolbar) { toolbar.remove(); toolbar = null; }
+      chromeHidden = false;
     }
 
-    function placeHandles() {
-      clearHandles();
-      if (!selected) return;
-      const rect = selected.getBoundingClientRect();
+    function handlePositions(rect) {
       const left = rect.left + window.scrollX;
       const top  = rect.top  + window.scrollY;
       const w = rect.width, h = rect.height;
-      const positions = {
+      return {
         nw: [left,         top],
         n:  [left + w / 2, top],
         ne: [left + w,     top],
@@ -263,6 +440,14 @@ export const EDITOR_JS = `
         sw: [left,         top + h],
         w:  [left,         top + h / 2],
       };
+    }
+
+    // Full build — runs on selection change only.
+    function placeHandles() {
+      clearHandles();
+      if (!selected) return;
+      const rect = selected.getBoundingClientRect();
+      const positions = handlePositions(rect);
       HANDLE_DIRS.forEach(dir => {
         const handle = doc.createElement('div');
         handle.className = 'resize-handle ' + dir;
@@ -277,8 +462,49 @@ export const EDITOR_JS = `
 
       toolbar = buildToolbar();
       doc.body.appendChild(toolbar);
-      positionToolbar(left, top, w);
+      positionToolbar(rect.left + window.scrollX, rect.top + window.scrollY, rect.width);
       syncToolbarState();
+    }
+
+    // Cheap update — mutates positions of existing handles. Runs during
+    // drag / resize / scroll instead of rebuilding the chrome every move.
+    function updateHandlePositions() {
+      if (!selected || !handles.length) return;
+      const rect = selected.getBoundingClientRect();
+      const positions = handlePositions(rect);
+      handles.forEach(h => {
+        const p = positions[h.dataset.dir];
+        h.style.left = (p[0] - 5) + 'px';
+        h.style.top  = (p[1] - 5) + 'px';
+      });
+      if (toolbar && !chromeHidden) {
+        positionToolbar(rect.left + window.scrollX, rect.top + window.scrollY, rect.width);
+      }
+    }
+
+    function scheduleHandleUpdate() {
+      if (raf) return;
+      raf = requestAnimationFrame(function () {
+        raf = 0;
+        updateHandlePositions();
+      });
+    }
+
+    function hideChrome() {
+      if (chromeHidden) return;
+      chromeHidden = true;
+      if (toolbar) toolbar.style.display = 'none';
+    }
+
+    function showChrome() {
+      if (!chromeHidden) return;
+      chromeHidden = false;
+      if (toolbar && selected) {
+        toolbar.style.display = '';
+        const rect = selected.getBoundingClientRect();
+        positionToolbar(rect.left + window.scrollX, rect.top + window.scrollY, rect.width);
+        syncToolbarState();
+      }
     }
 
     function buildToolbar() {
@@ -444,6 +670,7 @@ export const EDITOR_JS = `
 
     function deleteSelected() {
       if (!selected) return;
+      pushUndo();
       const victim = selected;
       clearHandles();
       selected.classList.remove('selected');
@@ -455,49 +682,68 @@ export const EDITOR_JS = `
         victim.parentNode.removeChild(victim);
       }
       notifyParentSelection();
+      notifyParentChange();
     }
 
     function toggleClass(cls) {
       if (!selected) return;
+      pushUndo();
       selected.classList.toggle(cls);
       syncToolbarState();
       notifyParentSelection();
+      notifyParentChange();
     }
     function setColor(color) {
       if (!selected) return;
+      pushUndo();
       selected.style.color = color;
       syncToolbarState();
       notifyParentSelection();
+      notifyParentChange();
     }
     function setBgColor(color) {
       if (!selected) return;
+      pushUndo();
       selected.style.backgroundColor = color;
       syncToolbarState();
       notifyParentSelection();
+      notifyParentChange();
     }
     function setAlign(align) {
       if (!selected) return;
+      pushUndo();
       selected.style.textAlign = align;
       syncToolbarState();
       notifyParentSelection();
+      notifyParentChange();
     }
     function nudgeFont(delta) {
       if (!selected) return;
+      pushUndo();
       const cs = getComputedStyle(selected);
       const cur = parseFloat(cs.fontSize) || 16;
       const next = Math.max(6, Math.min(240, cur + delta));
       selected.style.fontSize = next + 'px';
-      placeHandles();
+      updateHandlePositions();
       notifyParentSelection();
+      notifyParentChange();
     }
 
     function select(el) {
       if (editing && editing !== el) exitEditing();
       if (selected === el) return;
-      if (selected) selected.classList.remove('selected');
+      if (selected) {
+        selected.classList.remove('selected');
+        // Restore the pre-selection z-index: only the selected element is
+        // temporarily on top. (__baseZ is committed on a real drag, and set
+        // permanently for inserted elements at insert time.)
+        selected.style.zIndex = (selected.__baseZ !== undefined) ? selected.__baseZ : '';
+        delete selected.__baseZ;
+      }
       selected = el;
       if (selected) {
         selected.classList.add('selected');
+        selected.__baseZ = selected.style.zIndex || '';
         zCounter += 1;
         selected.style.zIndex = String(zCounter);
         placeHandles();
@@ -508,27 +754,26 @@ export const EDITOR_JS = `
     }
 
     doc.addEventListener('click', function (e) {
-      if (editing && e.target !== editing && !editing.contains(e.target)) {
-        exitEditing();
-      }
       if (e.target.tagName === 'A' || e.target.tagName === 'BUTTON') {
         if (!isEditorChrome(e.target)) e.preventDefault();
       }
-      if (isEditorChrome(e.target)) return;
-      if (e.target === doc.documentElement || e.target === doc.body) {
-        select(null);
-        return;
+      if (editing) {
+        // Clicks inside the element being edited must not re-select / exit.
+        if (e.target === editing || editing.contains(e.target)) return;
+        exitEditing();
       }
-      select(e.target);
+      if (isEditorChrome(e.target)) return;
+      // resolveTarget returns null for body / html → deselect.
+      select(resolveTarget(e.target));
     }, true);
 
     const DRAG_THRESHOLD = 3;
     let drag = null;
     doc.addEventListener('pointerdown', function (e) {
       if (isEditorChrome(e.target)) return;
-      if (e.target === doc.documentElement || e.target === doc.body) return;
-      const target = e.target;
-      if (target.isContentEditable) return;
+      if (e.target.isContentEditable) return;
+      const target = resolveTarget(e.target);
+      if (!target) return; // body / html — the click handler deselects
       select(target);
       drag = {
         el: target,
@@ -546,23 +791,42 @@ export const EDITOR_JS = `
       const dy = e.clientY - drag.startY;
       if (!drag.lifted) {
         if (Math.abs(dx) <= DRAG_THRESHOLD && Math.abs(dy) <= DRAG_THRESHOLD) return;
+        pushUndo();
         ensureAbsolute(drag.el);
         drag.startLeft = parseFloat(drag.el.style.left) || 0;
         drag.startTop  = parseFloat(drag.el.style.top)  || 0;
         drag.lifted = true;
+        drag.candidates = collectSnapCandidates(drag.el);
+        hideChrome();
       }
-      drag.el.style.left = (drag.startLeft + dx) + 'px';
-      drag.el.style.top  = (drag.startTop  + dy) + 'px';
-      placeHandles();
+      let newLeft = drag.startLeft + dx;
+      let newTop  = drag.startTop  + dy;
+      const snapped = snapToGuides(drag.el, newLeft, newTop, drag.candidates);
+      drag.el.style.left = snapped.left + 'px';
+      drag.el.style.top  = snapped.top  + 'px';
+      drawGuides(snapped.guides);
+      scheduleHandleUpdate();
     });
 
-    doc.addEventListener('pointerup', function () { drag = null; });
+    doc.addEventListener('pointerup', function () {
+      if (drag && drag.lifted) {
+        // A real move happened — commit the bumped z so the element stays
+        // above whatever it was dropped onto after deselect.
+        drag.el.__baseZ = drag.el.style.zIndex;
+        showChrome();
+        updateHandlePositions();
+        clearGuides();
+        notifyParentChange();
+      }
+      drag = null;
+    });
 
     let resize = null;
     function onResizeDown(e) {
       if (!selected) return;
       e.stopPropagation();
       e.preventDefault();
+      pushUndo();
       ensureAbsolute(selected);
       const dir = e.currentTarget.dataset.dir;
       resize = {
@@ -573,6 +837,7 @@ export const EDITOR_JS = `
         startWidth:  selected.getBoundingClientRect().width,
         startHeight: selected.getBoundingClientRect().height,
       };
+      hideChrome();
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
     }
 
@@ -600,16 +865,40 @@ export const EDITOR_JS = `
       el.style.top    = newTop  + 'px';
       el.style.width  = newW + 'px';
       el.style.height = newH + 'px';
-      placeHandles();
+      scheduleHandleUpdate();
     });
 
-    doc.addEventListener('pointerup', function () { resize = null; });
+    doc.addEventListener('pointerup', function () {
+      if (resize) {
+        showChrome();
+        updateHandlePositions();
+        notifyParentChange();
+      }
+      resize = null;
+    });
+
+    // Inserted kinds that have no editable text content.
+    const NON_TEXT_KINDS = {
+      'image': 1, 'video': 1, 'chart': 1, 'line-chart': 1,
+      'rect': 1, 'circle': 1, 'divider': 1,
+    };
+
+    function isTextEditable(el) {
+      if (el.matches('svg, img, video, iframe, table, hr')) return false;
+      const kind = el.getAttribute('data-editor-inserted');
+      if (kind && NON_TEXT_KINDS[kind]) return false;
+      return true;
+    }
 
     doc.addEventListener('dblclick', function (e) {
       if (isEditorChrome(e.target)) return;
-      if (e.target === doc.documentElement || e.target === doc.body) return;
-      const el = e.target;
+      const el = resolveTarget(e.target);
+      if (!el || !isTextEditable(el)) return;
+      // Capture the pre-edit state so undo restores it as one unit instead
+      // of one snapshot per keystroke.
+      pushUndo();
       el.setAttribute('contenteditable', 'true');
+      el.__editStart = el.innerHTML;
       el.focus();
       editing = el;
       const range = doc.createRange();
@@ -621,12 +910,38 @@ export const EDITOR_JS = `
     });
 
     doc.addEventListener('blur', function (e) {
-      if (e.target && e.target.getAttribute && e.target.getAttribute('contenteditable') === 'true') {
-        e.target.setAttribute('contenteditable', 'false');
+      const t = e.target;
+      if (t && t.getAttribute && t.getAttribute('contenteditable') === 'true') {
+        t.setAttribute('contenteditable', 'false');
+        if (t.__editStart !== undefined) {
+          if (t.innerHTML !== t.__editStart) notifyParentChange();
+          delete t.__editStart;
+        }
       }
     }, true);
 
     doc.addEventListener('keydown', function (e) {
+      const meta = e.metaKey || e.ctrlKey;
+      // Undo / redo work even while text editing — let the browser's native
+      // undo handle within the contenteditable, but a Cmd+Z at the top level
+      // (no contenteditable) restores the previous structural state.
+      if (meta && (e.key === 'z' || e.key === 'Z')) {
+        if (editing) return; // browser handles intra-text undo
+        e.preventDefault();
+        if (e.shiftKey) redo(); else undo();
+        return;
+      }
+      if (meta && (e.key === 'y' || e.key === 'Y')) {
+        if (editing) return;
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (e.key === 'Escape') {
+        if (editing) { exitEditing(); return; }
+        if (selected) select(null);
+        return;
+      }
       if (editing) return;
       if (e.key !== 'Delete' && e.key !== 'Backspace') return;
       if (!selected) return;
@@ -634,8 +949,137 @@ export const EDITOR_JS = `
       deleteSelected();
     });
 
-    window.addEventListener('scroll', placeHandles, true);
-    window.addEventListener('resize', placeHandles);
+    window.addEventListener('scroll', scheduleHandleUpdate, true);
+    window.addEventListener('resize', scheduleHandleUpdate);
+
+    // ── Drag alignment guides ────────────────────────────────────────
+    // collectSnapCandidates walks the artifact's top-level elements (plus
+    // the artifact's own center axes) and gathers viewport-space x/y values
+    // worth snapping to. Captured once per drag so we don't re-scan during
+    // pointermove.
+    const SNAP_THRESHOLD = 5;
+    const guideEls = [];
+
+    function collectSnapCandidates(drEl) {
+      const xs = [];
+      const ys = [];
+      // The artifact's own bounding box (root element / body) gives the
+      // outer edges + center cross to align against.
+      const bodyRect = doc.body.getBoundingClientRect();
+      xs.push({ x: bodyRect.left, kind: 'edge' });
+      xs.push({ x: bodyRect.left + bodyRect.width / 2, kind: 'center' });
+      xs.push({ x: bodyRect.right, kind: 'edge' });
+      ys.push({ y: bodyRect.top, kind: 'edge' });
+      ys.push({ y: bodyRect.top + bodyRect.height / 2, kind: 'center' });
+      ys.push({ y: bodyRect.bottom, kind: 'edge' });
+
+      // Siblings: only top-level children of body, skip chrome and the
+      // dragged element itself (and its ghost spacer).
+      Array.prototype.forEach.call(doc.body.children, function (n) {
+        if (n === drEl) return;
+        if (n === drEl.__ghost) return;
+        if (n.classList && (
+          n.classList.contains('resize-handle') ||
+          n.classList.contains('editor-toolbar') ||
+          n.classList.contains('editor-guide') ||
+          n.classList.contains('edit-ghost')
+        )) return;
+        const r = n.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) return;
+        xs.push({ x: r.left,   kind: 'edge' });
+        xs.push({ x: r.left + r.width / 2, kind: 'center' });
+        xs.push({ x: r.right,  kind: 'edge' });
+        ys.push({ y: r.top,    kind: 'edge' });
+        ys.push({ y: r.top + r.height / 2, kind: 'center' });
+        ys.push({ y: r.bottom, kind: 'edge' });
+      });
+      return { xs: xs, ys: ys, bodyRect: bodyRect, startRect: drEl.getBoundingClientRect() };
+    }
+
+    // snapToGuides applies up to one snap per axis and returns the adjusted
+    // (left, top) plus a list of guide overlays to render. The element rect
+    // at the *target* position is derived from drag.startRect + delta —
+    // works because the drag never scrolls the iframe.
+    function snapToGuides(drEl, newLeft, newTop, cands) {
+      if (!cands) return { left: newLeft, top: newTop, guides: [] };
+      const startStyleLeft = drag ? drag.startLeft : parseFloat(drEl.style.left) || 0;
+      const startStyleTop  = drag ? drag.startTop  : parseFloat(drEl.style.top)  || 0;
+      const dx = newLeft - startStyleLeft;
+      const dy = newTop  - startStyleTop;
+      const r = cands.startRect;
+      const targetLeft   = r.left + dx;
+      const targetTop    = r.top  + dy;
+      const targetRight  = targetLeft + r.width;
+      const targetBottom = targetTop  + r.height;
+      const targetCX     = targetLeft + r.width  / 2;
+      const targetCY     = targetTop  + r.height / 2;
+
+      const xRefs = [
+        { v: targetLeft,  side: 'left'   },
+        { v: targetCX,    side: 'center' },
+        { v: targetRight, side: 'right'  },
+      ];
+      const yRefs = [
+        { v: targetTop,    side: 'top'    },
+        { v: targetCY,     side: 'center' },
+        { v: targetBottom, side: 'bottom' },
+      ];
+
+      let bestX = null;
+      xRefs.forEach(function (ref) {
+        cands.xs.forEach(function (c) {
+          const d = Math.abs(c.x - ref.v);
+          if (d <= SNAP_THRESHOLD && (bestX === null || d < bestX.dist)) {
+            bestX = { dist: d, offset: c.x - ref.v, line: c.x };
+          }
+        });
+      });
+      let bestY = null;
+      yRefs.forEach(function (ref) {
+        cands.ys.forEach(function (c) {
+          const d = Math.abs(c.y - ref.v);
+          if (d <= SNAP_THRESHOLD && (bestY === null || d < bestY.dist)) {
+            bestY = { dist: d, offset: c.y - ref.v, line: c.y };
+          }
+        });
+      });
+
+      const guides = [];
+      if (bestX !== null) {
+        newLeft += bestX.offset;
+        guides.push({ axis: 'v', pos: bestX.line });
+      }
+      if (bestY !== null) {
+        newTop += bestY.offset;
+        guides.push({ axis: 'h', pos: bestY.line });
+      }
+      return { left: newLeft, top: newTop, guides: guides };
+    }
+
+    function drawGuides(guides) {
+      clearGuides();
+      if (!guides || !guides.length) return;
+      const bRect = doc.body.getBoundingClientRect();
+      guides.forEach(function (g) {
+        const el = doc.createElement('div');
+        el.className = 'editor-guide ' + g.axis;
+        if (g.axis === 'v') {
+          el.style.left   = (g.pos + window.scrollX) + 'px';
+          el.style.top    = (Math.max(0, bRect.top)    + window.scrollY) + 'px';
+          el.style.height = Math.max(bRect.height, doc.documentElement.clientHeight) + 'px';
+        } else {
+          el.style.top    = (g.pos + window.scrollY) + 'px';
+          el.style.left   = (Math.max(0, bRect.left)  + window.scrollX) + 'px';
+          el.style.width  = Math.max(bRect.width,  doc.documentElement.clientWidth)  + 'px';
+        }
+        doc.body.appendChild(el);
+        guideEls.push(el);
+      });
+    }
+    function clearGuides() {
+      guideEls.forEach(function (n) { n.remove(); });
+      guideEls.length = 0;
+    }
 
     // ── Insert helpers ────────────────────────────────────────────────
     function viewportCenter() {
@@ -714,6 +1158,7 @@ export const EDITOR_JS = `
     }
 
     function insertElement(kind) {
+      pushUndo();
       const { cx, cy } = viewportCenter();
       const el = doc.createElement('div');
       el.setAttribute('data-editor-inserted', kind);
@@ -830,7 +1275,19 @@ export const EDITOR_JS = `
       el.style.zIndex = String(zCounter);
       doc.body.appendChild(el);
       select(el);
+      notifyParentChange();
     }
+
+    // Initial height report + observer so auto-sized stages can size to
+    // the body's actual rendered height. The host page ignores reports for
+    // artifacts whose maker comment carried an explicit numeric height.
+    scheduleHeightReport();
+    window.addEventListener('load', scheduleHeightReport);
+    try {
+      if (typeof ResizeObserver === 'function') {
+        new ResizeObserver(scheduleHeightReport).observe(doc.documentElement);
+      }
+    } catch (e) {}
 
     window.__editor = {
       getSelected: () => selected,
@@ -841,13 +1298,23 @@ export const EDITOR_JS = `
       setAlign: function (align) { setAlign(align); },
       nudgeFont: function (delta) { nudgeFont(delta); },
       insertElement: function (kind) { insertElement(kind); },
+      undo: undo,
+      redo: redo,
       exportClean: function () {
         clearHandles();
         const wasSelected = selected;
         if (wasSelected) wasSelected.classList.remove('selected');
         const clone = doc.documentElement.cloneNode(true);
-        clone.querySelectorAll('.resize-handle, .editor-toolbar, .edit-ghost, #__editor_css, #__editor_js').forEach(n => n.remove());
+        clone.querySelectorAll('.resize-handle, .editor-toolbar, #__editor_css, #__editor_js').forEach(n => n.remove());
+        // Ghosts hold the flow slot of moved elements — removing them would
+        // reflow every sibling below in the exported HTML. Keep them as
+        // inert spacers (they already carry inline visibility:hidden + size).
+        clone.querySelectorAll('.edit-ghost').forEach(n => {
+          n.removeAttribute('class');
+          n.setAttribute('data-editor-spacer', '');
+        });
         clone.querySelectorAll('.selected').forEach(n => n.classList.remove('selected'));
+        clone.querySelectorAll('[contenteditable]').forEach(n => n.removeAttribute('contenteditable'));
         const html = '<!doctype html>\\n' + clone.outerHTML;
         if (wasSelected) {
           wasSelected.classList.add('selected');

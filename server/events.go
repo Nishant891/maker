@@ -170,22 +170,32 @@ func normalizeStatus(s string) string {
 }
 
 // makerCommentRe matches the per-artifact sizing comment the system prompt
-// requires on the first line of every generated HTML file:
+// requires on the first line of every generated HTML file. Height may be a
+// number or the literal "auto":
 //   <!-- maker:w=1280,h=720 -->
-var makerCommentRe = regexp.MustCompile(`<!--\s*maker:w=(\d+)\s*,\s*h=(\d+)\s*-->`)
+//   <!-- maker:w=1440,h=auto -->
+var makerCommentRe = regexp.MustCompile(`<!--\s*maker:w=(\d+)\s*,\s*h=(auto|\d+)\s*-->`)
 
 // dimensionsFromHTML returns the (width, height) carried in a maker sizing
-// comment, falling back to a 1280x720 slide-shape default. The 16:9 default
-// keeps a missing comment usable instead of crashing the UI.
+// comment. Height of -1 signals "auto" — the renderer will measure the
+// rendered body and grow the stage to fit. Falls back to 1920x1080 (16:9
+// presentation default) when the comment is missing or malformed.
 func dimensionsFromHTML(html string) (int, int) {
 	if m := makerCommentRe.FindStringSubmatch(html); m != nil {
 		w, _ := strconv.Atoi(m[1])
+		if w <= 0 {
+			return 1920, 1080
+		}
+		if m[2] == "auto" {
+			return w, -1
+		}
 		h, _ := strconv.Atoi(m[2])
-		if w > 0 && h > 0 {
+		if h > 0 {
 			return w, h
 		}
+		return w, -1
 	}
-	return 1280, 720
+	return 1920, 1080
 }
 
 func baseName(p string) string {
